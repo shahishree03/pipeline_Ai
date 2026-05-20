@@ -1,28 +1,26 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Upload, FileText, Database, Zap, Search, MessageSquare,
   Scale, Bot, Brain, BarChart3, PieChart,
   CheckCircle2, XCircle, Loader2, Clock, AlertTriangle,
   Play, SkipForward, RefreshCw, Terminal,
-  Hash, Cpu, Activity, TrendingUp, Award, Settings,
-  ChevronDown, ChevronUp, Send, Eye, EyeOff, Wifi, WifiOff,
-  Key, Link, FlaskConical, CheckSquare, Square, ArrowRight,
+  Hash, Cpu, Activity, TrendingUp, Award, X
 } from "lucide-react";
 
-// ─── STAGE DEFINITIONS ────────────────────────────────────────────────────────
+// ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
 const STAGES = [
-  { id: 1,  key: "upload",    label: "Assessment Upload",     icon: Upload,        color: "teal",    description: "Validates file integrity, extracts metadata, queues document for parsing." },
-  { id: 2,  key: "parsing",   label: "Document Parsing",      icon: FileText,      color: "blue",    description: "Runs layout detection to extract headings, code blocks, and text hierarchy." },
-  { id: 3,  key: "kb",        label: "Knowledge Base",        icon: Database,      color: "violet",  description: "Constructs a hierarchical knowledge store from parsed document nodes." },
-  { id: 4,  key: "embedding", label: "Embedding Generation",  icon: Zap,           color: "amber",   description: "Converts text chunks into dense vector embeddings via the embedding model." },
-  { id: 5,  key: "retrieval", label: "RAG Retrieval",         icon: Search,        color: "cyan",    description: "Validates retrieval quality: latency, top-K accuracy, context relevance." },
-  { id: 6,  key: "qgen",      label: "Question Generation",   icon: MessageSquare, color: "emerald", description: "LLM agent generates a diverse question bank aligned to document intent." },
-  { id: 7,  key: "rubric",    label: "Rubric Inference",      icon: Scale,         color: "orange",  description: "Extracts scoring rubrics and assigns channel weights per question difficulty." },
-  { id: 8,  key: "interview", label: "Adaptive Interview",    icon: Bot,           color: "pink",    description: "Orchestrates an adaptive agent-to-candidate interview with branching logic." },
-  { id: 9,  key: "eval",      label: "Semantic Evaluation",   icon: Brain,         color: "purple",  description: "Multi-channel evaluator: semantic similarity, intent alignment, keyword detection." },
-  { id: 10, key: "scoring",   label: "Scoring Normalization", icon: BarChart3,     color: "rose",    description: "Normalizes raw channel scores, applies difficulty weights, produces final grades." },
-  { id: 11, key: "analytics", label: "Dashboard Analytics",   icon: PieChart,      color: "indigo",  description: "Aggregates pipeline telemetry, candidate scores, exports final reports." },
+  { id: 1, key: "upload",    label: "Assessment Upload",     icon: Upload,        color: "teal",    description: "Validates file integrity, extracts metadata, queues document for parsing." },
+  { id: 2, key: "parsing",   label: "Document Parsing",      icon: FileText,      color: "blue",    description: "Runs layout detection to extract headings, code blocks, and text hierarchy." },
+  { id: 3, key: "kb",        label: "Knowledge Base",        icon: Database,      color: "violet",  description: "Constructs a hierarchical knowledge store from parsed document nodes." },
+  { id: 4, key: "embedding", label: "Embedding Generation",  icon: Zap,           color: "amber",   description: "Converts text chunks into dense vector embeddings via the embedding model." },
+  { id: 5, key: "retrieval", label: "RAG Retrieval",         icon: Search,        color: "cyan",    description: "Validates retrieval quality: latency, top-K accuracy, context relevance." },
+  { id: 6, key: "qgen",      label: "Question Generation",   icon: MessageSquare, color: "emerald", description: "LLM agent generates a diverse question bank aligned to document intent." },
+  { id: 7, key: "rubric",    label: "Rubric Inference",      icon: Scale,         color: "orange",  description: "Extracts scoring rubrics and assigns channel weights per question difficulty." },
+  { id: 8, key: "interview", label: "Adaptive Interview",    icon: Bot,           color: "pink",    description: "Orchestrates an adaptive agent-to-candidate interview with branching logic." },
+  { id: 9, key: "eval",      label: "Semantic Evaluation",   icon: Brain,         color: "purple",  description: "Multi-channel evaluator: semantic similarity, intent alignment, keyword detection." },
+  { id: 10, key: "scoring",  label: "Scoring Normalization", icon: BarChart3,     color: "rose",    description: "Normalizes raw channel scores, applies difficulty weights, produces final grades." },
+  { id: 11, key: "analytics",label: "Dashboard Analytics",   icon: PieChart,      color: "indigo",  description: "Aggregates pipeline telemetry, candidate scores, exports final reports." },
 ];
 
 const PIPELINE_SEQUENCE = STAGES.map(s => s.key);
@@ -43,11 +41,13 @@ const COLOR_MAP = {
 
 const LOG_COLORS = { INFO: "#94a3b8", SUCCESS: "#34d399", WARN: "#fbbf24", ERROR: "#f87171" };
 
-// ─── FALLBACK SIMULATION PAYLOADS ─────────────────────────────────────────────
-// Used when no API key is set OR when the API call fails.
+// ─── CLAUDE API STAGE PROMPTS ─────────────────────────────────────────────────
+// Upload stage is UI-driven (real file input). All other stages call Claude API.
 
 const STAGE_PROMPTS = {
-  parsing: `You are simulating a document parsing pipeline output for Java interview evaluation documents.
+  // upload is intentionally absent — handled by UploadStagePanel
+
+  parsing: `You are simulating a document parsing pipeline output for Java interview evaluation documents (Employee/Company system, BankAccount transfer, Beach rating finder).
 Return ONLY valid JSON (no markdown) with this structure:
 {
   "metrics": [
@@ -73,7 +73,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  kb: `Return ONLY valid JSON (no markdown):
+  kb: `You are simulating a Knowledge Base construction phase for a Java interview evaluation system covering 3 PDF/DOCX documents (Employee/Company, BankAccount, Beach rating).
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"KB Entries","value":"1,204","unit":""},
@@ -88,15 +89,6 @@ Return ONLY valid JSON (no markdown) with this structure:
     {"level":"L3 — Question Block","entries":312,"example":"Question EMP_01 — Private Access Modifiers"},
     {"level":"L4 — Rubric Criteria","entries":850,"example":"Channel: intent (weight: 0.25)"}
   ],
-  "checklist": [
-    {"id":"c1","label":"Answer key format matches schema v3.0","checked":true},
-    {"id":"c2","label":"All question IDs are globally unique","checked":true},
-    {"id":"c3","label":"Rubric weight sums == 1.0 per question","checked":true},
-    {"id":"c4","label":"Golden answers present for all questions","checked":true},
-    {"id":"c5","label":"Difficulty distribution within bounds (10-40% hard)","checked":false},
-    {"id":"c6","label":"No duplicate or near-duplicate questions detected","checked":true},
-    {"id":"c7","label":"Intent tags mapped to rubric channels","checked":true}
-  ],
   "logs": [
     {"time":"14:32:07.100","level":"INFO","msg":"KB construction initiated — schema_version: 3.0"},
     {"time":"14:32:08.440","level":"INFO","msg":"Inverted index built: 18,492 unique tokens"},
@@ -106,7 +98,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  embedding: `Return ONLY valid JSON (no markdown):
+  embedding: `You are simulating vector embedding generation for a Java interview knowledge base. Chunks come from Java OOP, arrays, exceptions, concurrency concepts.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Total Chunks","value":"1,204","unit":""},
@@ -122,7 +115,7 @@ Return ONLY valid JSON (no markdown) with this structure:
     {"id":"chunk_005","text":"Intent scoring must dominate over raw keyword matching. Runtime reasoning importance increases...","tokens":39,"dim":1536}
   ],
   "logs": [
-    {"time":"14:32:14.000","level":"INFO","msg":"Embedding model: text-embedding-3-large — 1536-dim"},
+    {"time":"14:32:14.000","level":"INFO","msg":"Embedding model: text-embedding-3-large (OpenAI) — 1536-dim"},
     {"time":"14:32:14.301","level":"INFO","msg":"Chunking strategy: semantic_sentence_window — overlap: 64 tokens"},
     {"time":"14:32:20.001","level":"INFO","msg":"Batch 1/4 complete — 301 chunks embedded"},
     {"time":"14:32:27.880","level":"INFO","msg":"Batch 4/4 complete — all 1,204 chunks embedded"},
@@ -130,7 +123,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  retrieval: `Return ONLY valid JSON (no markdown):
+  retrieval: `You are simulating RAG retrieval validation for a Java interview evaluation system. Generate realistic retrieval quality metrics.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Avg Latency","value":"42","unit":"ms"},
@@ -154,7 +148,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  qgen: `Return ONLY valid JSON (no markdown):
+  qgen: `You are an enterprise Java interview question generation AI. Based on three Java problems (Employee/Company management system, BankAccount transfer system, Beach rating finder), generate exactly 5 diverse interview questions across difficulty levels.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Questions Generated","value":"48","unit":""},
@@ -170,7 +165,7 @@ Return ONLY valid JSON (no markdown) with this structure:
     {"id":"BANK_18","diff":"hard","text":"Two threads call transferFunds simultaneously on the same account — describe the race condition and its prevention.","intent":"Concurrency safety","mustInclude":["race condition","synchronized","lost update"]}
   ],
   "logs": [
-    {"time":"14:32:36.000","level":"INFO","msg":"Q-gen agent initialized — model: local/groq"},
+    {"time":"14:32:36.000","level":"INFO","msg":"Q-gen agent initialized — model: claude-sonnet-4-20250514"},
     {"time":"14:32:38.001","level":"INFO","msg":"Diversity constraint: max 3 questions per document section"},
     {"time":"14:32:50.220","level":"INFO","msg":"Generated 48 questions: 16 easy / 20 medium / 12 hard"},
     {"time":"14:32:51.001","level":"INFO","msg":"Diversity score: 0.89 (coverage across 11 Java topics)"},
@@ -178,7 +173,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  rubric: `Return ONLY valid JSON (no markdown):
+  rubric: `You are a rubric inference engine for an enterprise Java interview evaluation system. Extract and weight scoring rubric channels from the evaluation schema v3.0.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Rubric Channels","value":"7","unit":""},
@@ -204,7 +200,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  interview: `Return ONLY valid JSON (no markdown):
+  interview: `You are simulating an adaptive AI interviewer conducting a Java technical interview. Generate a realistic 6-turn transcript covering encapsulation, constructors, and JVM defaults.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Questions Asked","value":"18","unit":""},
@@ -214,9 +211,9 @@ Return ONLY valid JSON (no markdown) with this structure:
   ],
   "transcript": [
     {"role":"agent","text":"What does the private access modifier do in Java's Employee class — specifically, who or what is it keeping out?","qid":"EMP_01"},
-    {"role":"candidate","text":"Private restricts field access to within the Employee class itself. External classes like Company or main cannot directly read or write those fields — that is the core of encapsulation. It forces any changes to go through controlled methods.","score":0.88},
-    {"role":"agent","text":"Good. Now — if you had used a no-arg constructor with four setter calls instead of a parameterized constructor, what is the data-level risk during that window between construction and all setters completing?","qid":"EMP_02"},
-    {"role":"candidate","text":"There is a window where the object exists but fields still hold JVM defaults — zero, null, 0.0. If another thread or method accesses the object before all four setters finish, it could see invalid state. The parameterized constructor makes initialization atomic.","score":0.93},
+    {"role":"candidate","text":"Private restricts field access to within the Employee class itself. External classes like Company or main cannot directly read or write those fields — that's the core of encapsulation. It forces any changes to go through controlled methods.","score":0.88},
+    {"role":"agent","text":"Good. Now — if you'd used a no-arg constructor with four setter calls instead of a parameterized constructor, what's the data-level risk during that window between construction and all setters completing?","qid":"EMP_02"},
+    {"role":"candidate","text":"There's a window where the object exists but fields still hold JVM defaults — zero, null, 0.0. If another thread or method accesses the object before all four setters finish, it could see invalid state. The parameterized constructor makes initialization atomic.","score":0.93},
     {"role":"agent","text":"[FOLLOW-UP] You said JVM defaults — what specifically would salary and name hold in that window?","qid":"EMP_02_FU"},
     {"role":"candidate","text":"salary would be 0.0 as a double default, and name would be null as an object reference default. Zero for int id as well.","score":0.97}
   ],
@@ -229,7 +226,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  eval: `Return ONLY valid JSON (no markdown):
+  eval: `You are a multi-channel semantic evaluation engine scoring Java interview responses. Score 5 candidate answers across 7 rubric channels (semantic, intent, keyword, reasoning, runtime, edge, arch).
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Responses Scored","value":"18","unit":""},
@@ -253,7 +251,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  scoring: `Return ONLY valid JSON (no markdown):
+  scoring: `You are a scoring normalization engine for a Java interview evaluation system. Apply difficulty weights, detect outliers, and produce a final normalized score.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Final Score","value":"0.847","unit":""},
@@ -278,7 +277,8 @@ Return ONLY valid JSON (no markdown) with this structure:
   ]
 }`,
 
-  analytics: `Return ONLY valid JSON (no markdown):
+  analytics: `You are an analytics aggregation engine. Generate a comprehensive candidate evaluation report for a Java backend developer (CAND_001) who scored 0.847 overall.
+Return ONLY valid JSON (no markdown):
 {
   "metrics": [
     {"label":"Overall Score","value":"84.7%","unit":""},
@@ -305,7 +305,7 @@ Return ONLY valid JSON (no markdown) with this structure:
     "Edge-case reasoning below threshold on array boundary operations",
     "Architecture scalability signals sparse on hard concurrency questions"
   ],
-  "recommendation": "Candidate demonstrates solid intermediate-to-advanced Java knowledge with strong OOP fundamentals and exception awareness. Recommended for mid-level backend role. Suggested growth areas: distributed system design patterns and deep concurrency primitives.",
+  "recommendation": "Candidate demonstrates solid intermediate-to-advanced Java knowledge with strong OOP fundamentals and exception awareness. Recommended for mid-level backend role. Suggested growth areas: distributed system design patterns and deep concurrency primitives (ReentrantLock, CompletableFuture).",
   "logs": [
     {"time":"14:35:16.000","level":"INFO","msg":"Analytics aggregation: 11 pipeline stages — 18 Q&A pairs"},
     {"time":"14:35:16.400","level":"INFO","msg":"PDF report generated: eval_CAND_001_20240118.pdf"},
@@ -316,79 +316,29 @@ Return ONLY valid JSON (no markdown) with this structure:
 }`
 };
 
-// ─── SIMULATION FALLBACK PAYLOADS (static, no LLM needed) ────────────────────
+// ─── CLAUDE API CALL ──────────────────────────────────────────────────────────
 
-function buildSimulationPayload(stageKey) {
-  try {
-    const raw = STAGE_PROMPTS[stageKey];
-    if (!raw) return null;
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
-// ─── SAFE JSON EXTRACTOR ─────────────────────────────────────────────────────
-// Handles conversational preamble and markdown fences from local models.
-
-function safeExtractJSON(text) {
-  try {
-    // Strip markdown fences
-    const stripped = text.replace(/```json|```/g, "").trim();
-    // Try direct parse first
-    return JSON.parse(stripped);
-  } catch {
-    // Try regex extraction of first JSON object
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch { /* fall through */ }
-    }
-    // Try regex extraction of first JSON array
-    const arrMatch = text.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      try { return JSON.parse(arrMatch[0]); } catch { /* fall through */ }
-    }
-    return null;
-  }
-}
-
-// ─── OPENAI-COMPATIBLE API CALL ───────────────────────────────────────────────
-
-async function callLocalOrGroqAPI(stageKey, { baseUrl, apiKey, model }) {
-  if (stageKey === "upload") throw new Error("Upload stage is UI-driven");
+async function callClaudeStage(stageKey) {
+  if (stageKey === "upload") throw new Error("Upload stage is UI-driven, not API-driven");
   const prompt = STAGE_PROMPTS[stageKey];
-  if (!prompt) throw new Error(`No prompt defined for stage: ${stageKey}`);
-
-  const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey && apiKey.trim()) headers["Authorization"] = `Bearer ${apiKey.trim()}`;
-
-  const response = await fetch(url, {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: model || "llama3-8b-8192",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
-      temperature: 0.1,
-      messages: [{ role: "user", content: prompt }],
-    }),
+      messages: [{ role: "user", content: prompt }]
+    })
   });
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`API ${response.status}: ${body.slice(0, 200)}`);
-  }
-
+  if (!response.ok) throw new Error(`API error: ${response.status}`);
   const data = await response.json();
-  const text = (data.choices?.[0]?.message?.content) || "{}";
-  const parsed = safeExtractJSON(text);
-  if (!parsed) throw new Error("Could not extract valid JSON from response");
-  return parsed;
+  const text = data.content?.map(b => b.text || "").join("") || "{}";
+  // Strip any accidental markdown fences
+  const clean = text.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
 }
 
-// ─── SMALL COMPONENTS ─────────────────────────────────────────────────────────
+// ─── SMALL UI COMPONENTS ──────────────────────────────────────────────────────
 
 function StatusDot({ status }) {
   if (status === "processing") return <Loader2 size={14} className="text-blue-400 animate-spin" />;
@@ -418,7 +368,7 @@ function LogConsole({ logs = [] }) {
       {logs.map((log, i) => (
         <div key={i} className="flex gap-2 mb-0.5">
           <span className="text-slate-600 shrink-0">{log.time}</span>
-          <span className="shrink-0 w-16" style={{ color: LOG_COLORS[log.level] || "#94a3b8" }}>[{log.level}]</span>
+          <span className="shrink-0 w-14" style={{ color: LOG_COLORS[log.level] || "#94a3b8" }}>[{log.level}]</span>
           <span className="text-slate-300">{log.msg}</span>
         </div>
       ))}
@@ -431,7 +381,8 @@ function ScoreBar({ value, color = "#10b981" }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${pct}%`, background: color }} />
+        <div className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${pct}%`, background: color }} />
       </div>
       <span className="text-xs text-slate-400 w-9 text-right">{value.toFixed(2)}</span>
     </div>
@@ -448,7 +399,7 @@ function RadarChart({ data }) {
       y: cy + Math.sin(angle) * r * d.score,
       lx: cx + Math.cos(angle) * (r + 22),
       ly: cy + Math.sin(angle) * (r + 22),
-      label: d.label, score: d.score,
+      label: d.label, score: d.score
     };
   });
   const gridLines = [0.25, 0.5, 0.75, 1.0].map(scale =>
@@ -460,7 +411,9 @@ function RadarChart({ data }) {
   const shapePts = pts.map(p => `${p.x},${p.y}`).join(" ");
   return (
     <svg viewBox="0 0 240 240" className="w-full max-w-xs mx-auto">
-      {gridLines.map((poly, i) => <polygon key={i} points={poly} fill="none" stroke="#1e293b" strokeWidth="1" />)}
+      {gridLines.map((poly, i) => (
+        <polygon key={i} points={poly} fill="none" stroke="#1e293b" strokeWidth="1" />
+      ))}
       {data.map((_, i) => {
         const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
         return <line key={i} x1={cx} y1={cy} x2={cx + Math.cos(angle) * r} y2={cy + Math.sin(angle) * r} stroke="#1e293b" strokeWidth="1" />;
@@ -476,113 +429,8 @@ function RadarChart({ data }) {
   );
 }
 
-// ─── API CONFIGURATION HEADER ─────────────────────────────────────────────────
-
-const PRESETS = [
-  { label: "Groq",         baseUrl: "https://api.groq.com/v1",         model: "llama3-8b-8192" },
-  { label: "Ollama",       baseUrl: "http://localhost:11434/v1",        model: "llama3" },
-  { label: "LM Studio",    baseUrl: "http://localhost:1234/v1",         model: "local-model" },
-  { label: "OpenAI",       baseUrl: "https://api.openai.com/v1",        model: "gpt-4o-mini" },
-  { label: "OpenRouter",   baseUrl: "https://openrouter.ai/api/v1",     model: "mistralai/mistral-7b-instruct" },
-];
-
-function APIConfigPanel({ config, setConfig, simMode }) {
-  const [open, setOpen] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-
-  const applyPreset = (p) => setConfig(c => ({ ...c, baseUrl: p.baseUrl, model: p.model }));
-
-  return (
-    <div className="border-b border-slate-800 bg-slate-900/60">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-slate-800/40 transition-colors text-left"
-      >
-        <Settings size={13} className={simMode ? "text-amber-400" : "text-slate-400"} />
-        <span className="text-xs font-medium text-slate-300">API Configuration</span>
-        {simMode && (
-          <span className="flex items-center gap-1 text-xs text-amber-400 bg-amber-900/30 border border-amber-800/40 px-2 py-0.5 rounded-full ml-1">
-            <FlaskConical size={10} /> Simulation Mode
-          </span>
-        )}
-        {!simMode && (
-          <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-900/30 border border-emerald-800/40 px-2 py-0.5 rounded-full ml-1">
-            <Wifi size={10} /> Live API
-          </span>
-        )}
-        <div className="ml-auto">
-          {open ? <ChevronUp size={13} className="text-slate-500" /> : <ChevronDown size={13} className="text-slate-500" />}
-        </div>
-      </button>
-
-      {open && (
-        <div className="px-4 pb-4 pt-1 bg-slate-900/80 border-t border-slate-800/60">
-          {/* Presets */}
-          <div className="mb-3">
-            <p className="text-xs text-slate-500 mb-1.5">Quick Presets</p>
-            <div className="flex flex-wrap gap-1.5">
-              {PRESETS.map(p => (
-                <button key={p.label} onClick={() => applyPreset(p)}
-                  className={`text-xs px-2.5 py-1 rounded border transition-all ${config.baseUrl === p.baseUrl ? "bg-indigo-900/50 border-indigo-600/60 text-indigo-300" : "bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200"}`}>
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {/* Base URL */}
-            <div className="sm:col-span-1">
-              <label className="flex items-center gap-1 text-xs text-slate-500 mb-1"><Link size={10} /> Base URL</label>
-              <input
-                type="text"
-                value={config.baseUrl}
-                onChange={e => setConfig(c => ({ ...c, baseUrl: e.target.value }))}
-                placeholder="https://api.groq.com/v1"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-
-            {/* API Key */}
-            <div className="sm:col-span-1">
-              <label className="flex items-center gap-1 text-xs text-slate-500 mb-1"><Key size={10} /> API Key <span className="text-slate-600">(optional — blank = Simulation)</span></label>
-              <div className="relative">
-                <input
-                  type={showKey ? "text" : "password"}
-                  value={config.apiKey}
-                  onChange={e => setConfig(c => ({ ...c, apiKey: e.target.value }))}
-                  placeholder="Leave blank for local/simulation"
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 pr-7 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                />
-                <button onClick={() => setShowKey(s => !s)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
-                  {showKey ? <EyeOff size={12} /> : <Eye size={12} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Model */}
-            <div className="sm:col-span-1">
-              <label className="flex items-center gap-1 text-xs text-slate-500 mb-1"><Cpu size={10} /> Model ID</label>
-              <input
-                type="text"
-                value={config.model}
-                onChange={e => setConfig(c => ({ ...c, model: e.target.value }))}
-                placeholder="llama3-8b-8192"
-                className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-          </div>
-
-          <p className="text-xs text-slate-600 mt-2">
-            Tip: Leave API Key empty to run in Simulation Mode (uses local fallback payloads). Any network error also falls back automatically.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── UPLOAD STAGE PANEL ───────────────────────────────────────────────────────
+// Real drag-and-drop file input — no Claude API needed for upload
 
 const ACCEPTED_TYPES = [".pdf", ".docx", ".md", ".json", ".txt"];
 const MAX_FILES = 5;
@@ -604,14 +452,20 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
   const selectedFile = uploadedFiles[selectedIndex] || null;
 
   useEffect(() => {
-    if (!selectedFile || selectedFile.type !== "PDF") { setPreviewUrl(""); return; }
+    if (!selectedFile || selectedFile.type !== "PDF") {
+      setPreviewUrl("");
+      return;
+    }
     const url = URL.createObjectURL(selectedFile.file);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [selectedFile]);
 
   useEffect(() => {
-    if (!selectedFile || !["TXT", "MD", "JSON"].includes(selectedFile.type)) { setPreviewText(""); return; }
+    if (!selectedFile || !["TXT", "MD", "JSON"].includes(selectedFile.type)) {
+      setPreviewText("");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => setPreviewText(reader.result || "");
     reader.onerror = () => setPreviewText("Unable to load preview.");
@@ -620,11 +474,17 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
   }, [selectedFile]);
 
   useEffect(() => {
-    if (uploadedFiles.length === 0) { setSelectedIndex(0); setPreviewText(""); setPreviewUrl(""); }
-    else if (selectedIndex >= uploadedFiles.length) setSelectedIndex(0);
+    if (uploadedFiles.length === 0) {
+      setSelectedIndex(0);
+      setPreviewText("");
+      setPreviewUrl("");
+    } else if (selectedIndex >= uploadedFiles.length) {
+      setSelectedIndex(0);
+    }
   }, [uploadedFiles, selectedIndex]);
 
   const simulateProgress = useCallback((name) => {
+    // Simulate a chunked upload progress for each file
     let pct = 0;
     const interval = setInterval(() => {
       pct += Math.random() * 25 + 10;
@@ -638,23 +498,42 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
       .filter(f => ACCEPTED_TYPES.some(ext => f.name.toLowerCase().endsWith(ext)))
       .slice(0, MAX_FILES);
     if (!valid.length) return;
+
     const enriched = valid.map(f => ({
-      file: f, name: f.name, size: formatBytes(f.size), rawSize: f.size,
-      type: f.name.split(".").pop().toUpperCase(), status: "uploading",
-      hash: "sha256:" + Math.random().toString(36).slice(2, 10) + "...",
+      file: f,
+      name: f.name,
+      size: formatBytes(f.size),
+      rawSize: f.size,
+      type: f.name.split(".").pop().toUpperCase(),
+      status: "uploading",
+      hash: "sha256:" + Math.random().toString(36).slice(2, 10) + "..."
     }));
+
     enriched.forEach(e => simulateProgress(e.name));
+
+    // After all progress animations settle, mark ready
     setTimeout(() => {
-      onFilesReady(enriched.map(e => ({ ...e, status: "verified" })));
+      const finalFiles = enriched.map(e => ({ ...e, status: "verified" }));
+      onFilesReady(finalFiles);
     }, enriched.length * 200 + 800);
   }, [simulateProgress, onFilesReady]);
 
-  const onDrop = useCallback((e) => { e.preventDefault(); setDragOver(false); processFiles(e.dataTransfer.files); }, [processFiles]);
-  const onInputChange = useCallback((e) => { processFiles(e.target.files); e.target.value = ""; }, [processFiles]);
+  const onDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+    processFiles(e.dataTransfer.files);
+  }, [processFiles]);
+
+  const onInputChange = useCallback((e) => {
+    processFiles(e.target.files);
+    e.target.value = "";
+  }, [processFiles]);
+
   const allDone = uploadedFiles.length > 0 && uploadedFiles.every(f => f.status === "verified");
 
   return (
     <div className="mb-4">
+      {/* Drop zone — only show when no files yet and not already success */}
       {status !== "success" && uploadedFiles.length === 0 && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -662,7 +541,10 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
           onDrop={onDrop}
           onClick={() => inputRef.current?.click()}
           className="cursor-pointer border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-3 py-10 mb-4 transition-all duration-200"
-          style={{ borderColor: dragOver ? "#6366f1" : "#334155", background: dragOver ? "rgba(99,102,241,0.07)" : "rgba(15,23,42,0.5)" }}
+          style={{
+            borderColor: dragOver ? "#6366f1" : "#334155",
+            background: dragOver ? "rgba(99,102,241,0.07)" : "rgba(15,23,42,0.5)"
+          }}
         >
           <div className="w-12 h-12 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
             <Upload size={22} className="text-teal-400" />
@@ -671,13 +553,23 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
             <p className="text-sm font-medium text-white">Drop assessment files here</p>
             <p className="text-xs text-slate-500 mt-1">or click to browse · PDF, DOCX, MD, JSON, TXT</p>
           </div>
-          <input ref={inputRef} type="file" multiple accept={ACCEPTED_TYPES.join(",")} className="hidden" onChange={onInputChange} />
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept={ACCEPTED_TYPES.join(",")}
+            className="hidden"
+            onChange={onInputChange}
+          />
         </div>
       )}
 
+      {/* File list */}
       {uploadedFiles.length > 0 && (
         <div className="space-y-1.5 mb-4">
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">{allDone ? "Uploaded Files" : "Uploading…"}</p>
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">
+            {allDone ? "Uploaded Files" : "Uploading…"}
+          </p>
           {uploadedFiles.map((f, i) => {
             const pct = progresses[f.name] ?? 0;
             const done = f.status === "verified";
@@ -689,13 +581,24 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
                     <p className="text-xs text-white font-medium truncate">{f.name}</p>
                     <p className="text-xs text-slate-500">{f.size} · <span className="font-mono">{f.hash}</span></p>
                   </div>
-                  {done ? <CheckCircle2 size={13} className="text-emerald-400 shrink-0" /> : <Loader2 size={13} className="text-blue-400 shrink-0 animate-spin" />}
+                  {done
+                    ? <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    : <Loader2 size={13} className="text-blue-400 shrink-0 animate-spin" />
+                  }
                 </div>
+                {/* Progress bar */}
                 <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-150"
-                    style={{ width: `${done ? 100 : pct}%`, background: done ? "#34d399" : "#6366f1" }} />
+                  <div
+                    className="h-full rounded-full transition-all duration-150"
+                    style={{
+                      width: `${done ? 100 : pct}%`,
+                      background: done ? "#34d399" : "#6366f1"
+                    }}
+                  />
                 </div>
-                {!done && <p className="text-xs text-slate-500 mt-0.5 text-right">{pct}%</p>}
+                {!done && (
+                  <p className="text-xs text-slate-500 mt-0.5 text-right">{pct}%</p>
+                )}
               </div>
             );
           })}
@@ -703,42 +606,72 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
       )}
 
       {uploadedFiles.length > 0 && (
-        <div className="rounded-2xl border border-slate-700/60 bg-slate-900/80 p-4 mb-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
-            <p className="text-sm font-semibold text-white">Document Explorer</p>
+        <div className="rounded-3xl border border-slate-700/60 bg-slate-900/80 p-4 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
+            <div>
+              <p className="text-sm font-semibold text-white">Document Explorer</p>
+              <p className="text-xs text-slate-500">Preview uploaded PDF files and inspect document metadata.</p>
+            </div>
             <div className="flex flex-wrap gap-2">
               {uploadedFiles.map((f, i) => (
-                <button key={f.name} onClick={() => setSelectedIndex(i)}
-                  className={`text-xs px-3 py-1 rounded-full transition ${selectedIndex === i ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700/80"}`}>
+                <button
+                  key={f.name}
+                  type="button"
+                  onClick={() => setSelectedIndex(i)}
+                  className={`text-xs px-3 py-1 rounded-full transition ${selectedIndex === i ? "bg-slate-700 text-white" : "bg-slate-800 text-slate-400 hover:bg-slate-700/80"}`}
+                >
                   {f.name}
                 </button>
               ))}
             </div>
           </div>
-          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-            <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 space-y-2 text-xs text-slate-400">
-              <p className="text-xs text-slate-500 uppercase tracking-wider">Selected File</p>
-              <p className="text-sm font-semibold text-white truncate">{selectedFile?.name || "—"}</p>
-              {selectedFile && <>
-                <p><span className="text-slate-500">Type:</span> {selectedFile.type}</p>
-                <p><span className="text-slate-500">Size:</span> {selectedFile.size}</p>
-                <p><span className="text-slate-500">Status:</span> {selectedFile.status}</p>
-                <p className="truncate"><span className="text-slate-500">Hash:</span> <span className="font-mono text-slate-300">{selectedFile.hash}</span></p>
-              </>}
+
+          <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3">
+                <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Selected File</p>
+                <p className="text-sm font-semibold text-white truncate">{selectedFile?.name || "No file selected"}</p>
+                {selectedFile && (
+                  <div className="mt-3 space-y-2 text-xs text-slate-400">
+                    <p><span className="text-slate-500">Type:</span> {selectedFile.type}</p>
+                    <p><span className="text-slate-500">Size:</span> {selectedFile.size}</p>
+                    <p><span className="text-slate-500">Status:</span> {selectedFile.status}</p>
+                    <p><span className="text-slate-500">Hash:</span> <span className="font-mono text-slate-300">{selectedFile.hash}</span></p>
+                  </div>
+                )}
+              </div>
+              <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3">
+                <p className="text-xs text-slate-500 uppercase tracking-wider mb-2">Explore Controls</p>
+                <p className="text-xs text-slate-400">Click a file tab to preview it in the viewer.</p>
+                {selectedFile?.type === "PDF" && (
+                  <p className="text-xs text-slate-400 mt-1">PDF preview is available below.</p>
+                )}
+                {selectedFile && !["PDF", "TXT", "MD", "JSON"].includes(selectedFile.type) && (
+                  <p className="text-xs text-slate-500 mt-1">This file type can be downloaded, but inline preview may not be available.</p>
+                )}
+              </div>
             </div>
-            <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 min-h-[280px]">
-              {selectedFile?.type === "PDF" ? (
-                <object data={previewUrl} type="application/pdf" width="100%" height="340" className="border border-slate-800 rounded-lg overflow-hidden">
-                  <p className="text-xs text-slate-500">PDF preview unavailable. <a href={previewUrl} target="_blank" rel="noreferrer" className="text-slate-300 underline">Open in new tab</a>.</p>
-                </object>
-              ) : ["TXT", "MD", "JSON"].includes(selectedFile?.type) ? (
-                <div className="h-[340px] overflow-y-auto text-xs text-slate-200 font-mono whitespace-pre-wrap break-words bg-slate-950/80 rounded-lg p-3 border border-slate-800">
-                  {previewText || "Loading preview..."}
-                </div>
+
+            <div className="bg-slate-950/90 border border-slate-800 rounded-2xl p-3 min-h-[320px]">
+              {selectedFile ? (
+                selectedFile.type === "PDF" ? (
+                  <object data={previewUrl} type="application/pdf" width="100%" height="420" className="border border-slate-800 rounded-lg overflow-hidden">
+                    <p className="text-xs text-slate-500">PDF preview is unavailable in this browser. <a href={previewUrl} target="_blank" rel="noreferrer" className="text-slate-300 underline">Open in new tab</a>.</p>
+                  </object>
+                ) : ["TXT", "MD", "JSON"].includes(selectedFile.type) ? (
+                  <div className="h-[420px] overflow-y-auto text-xs text-slate-200 font-mono whitespace-pre-wrap break-words bg-slate-950/80 rounded-lg p-3 border border-slate-800">
+                    {previewText || "Loading preview..."}
+                  </div>
+                ) : (
+                  <div className="h-[420px] flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-lg px-4 text-center">
+                    <p className="text-sm text-white">Preview not available for this document type.</p>
+                    <p className="text-xs mt-2">Use the file browser to open it directly in your OS or upload a PDF for inline exploration.</p>
+                  </div>
+                )
               ) : (
-                <div className="h-[280px] flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-lg px-4 text-center">
-                  <p className="text-sm text-white">Select a file to preview it.</p>
-                  <p className="text-xs mt-2">PDF and text files render inline.</p>
+                <div className="h-[420px] flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-800 rounded-lg px-4 text-center">
+                  <p className="text-sm text-white">Select a file to explore its preview.</p>
+                  <p className="text-xs mt-2">PDF files render inline, text files show the first content chunk.</p>
                 </div>
               )}
             </div>
@@ -746,6 +679,7 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
         </div>
       )}
 
+      {/* After success: show re-upload option */}
       {status === "success" && (
         <div className="flex items-center gap-2 mt-2">
           <CheckCircle2 size={14} className="text-emerald-400" />
@@ -753,6 +687,7 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
         </div>
       )}
 
+      {/* Accepted types hint */}
       {status !== "success" && uploadedFiles.length === 0 && (
         <div className="flex flex-wrap gap-1.5 mt-1">
           {ACCEPTED_TYPES.map(t => (
@@ -764,144 +699,19 @@ function UploadStagePanel({ uploadedFiles, onFilesReady, status }) {
   );
 }
 
-// ─── KB CHECKLIST (Stage 3) ───────────────────────────────────────────────────
-
-function KBChecklist({ checklist, onToggle }) {
-  if (!checklist || checklist.length === 0) return null;
-  const allPassed = checklist.every(c => c.checked);
-  return (
-    <div className="mb-4">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">Benchmark Criteria Checklist</p>
-        {allPassed
-          ? <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 size={11} /> All criteria met</span>
-          : <span className="text-xs text-amber-400 flex items-center gap-1"><AlertTriangle size={11} /> {checklist.filter(c => !c.checked).length} pending</span>
-        }
-      </div>
-      <div className="space-y-1.5">
-        {checklist.map((item) => (
-          <button key={item.id} onClick={() => onToggle(item.id)}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-all ${item.checked ? "bg-emerald-900/20 border-emerald-800/40" : "bg-slate-800/40 border-slate-700/40 hover:border-slate-600"}`}>
-            {item.checked
-              ? <CheckSquare size={14} className="text-emerald-400 shrink-0" />
-              : <Square size={14} className="text-slate-500 shrink-0" />
-            }
-            <span className={`text-xs ${item.checked ? "text-emerald-300" : "text-slate-400"}`}>{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── INTERACTIVE Q&A PANEL (Stages 6 & 8) ────────────────────────────────────
-
-function InteractiveQAPanel({ questions, onSendToEval, stageKey }) {
-  const [selectedQ, setSelectedQ] = useState(0);
-  const [answer, setAnswer] = useState("");
-  const [sent, setSent] = useState(false);
-
-  const q = questions?.[selectedQ];
-
-  const handleSend = () => {
-    if (!answer.trim() || !q) return;
-    onSendToEval({ question: q, answer: answer.trim() });
-    setSent(true);
-  };
-
-  const handleNext = () => {
-    setSent(false);
-    setAnswer("");
-    setSelectedQ(i => Math.min(i + 1, (questions?.length ?? 1) - 1));
-  };
-
-  if (!questions || questions.length === 0) return null;
-
-  return (
-    <div className="mb-4 rounded-xl border border-slate-700/60 bg-slate-900/60 p-4">
-      <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
-        {stageKey === "interview" ? "Live Interview Session" : "Test Answer Submission"}
-      </p>
-
-      {/* Question selector */}
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {questions.map((q, i) => (
-          <button key={q.id || i} onClick={() => { setSelectedQ(i); setSent(false); setAnswer(""); }}
-            className={`text-xs px-2.5 py-1 rounded border font-mono transition-all ${selectedQ === i ? "bg-indigo-900/50 border-indigo-600/60 text-indigo-300" : "bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500"}`}>
-            {q.id || `Q${i + 1}`}
-          </button>
-        ))}
-      </div>
-
-      {/* Question card */}
-      {q && (
-        <div className="bg-slate-800/60 border border-slate-700/40 rounded-lg p-3 mb-3">
-          <div className="flex items-center gap-2 mb-1.5">
-            {q.diff && (
-              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${q.diff === "easy" ? "bg-emerald-900/40 text-emerald-400" : q.diff === "medium" ? "bg-amber-900/40 text-amber-400" : "bg-red-900/40 text-red-400"}`}>
-                {q.diff}
-              </span>
-            )}
-            {q.qid && <span className="text-xs font-mono text-slate-500">[{q.qid}]</span>}
-            {q.role === "agent" && <span className="text-xs text-blue-400">🤖 Interviewer</span>}
-          </div>
-          <p className="text-sm text-white leading-relaxed">{q.text || q.question || q.content}</p>
-          {q.intent && <p className="text-xs text-slate-500 mt-1">Intent: {q.intent}</p>}
-          {q.mustInclude && q.mustInclude.length > 0 && (
-            <div className="flex gap-1 flex-wrap mt-2">
-              {q.mustInclude.map((kw, j) => <span key={j} className="text-xs bg-slate-700/50 text-slate-400 px-1.5 py-0.5 rounded">{kw}</span>)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Answer input */}
-      {!sent ? (
-        <div className="space-y-2">
-          <textarea
-            value={answer}
-            onChange={e => setAnswer(e.target.value)}
-            placeholder="Type your answer here — it will be sent to the Semantic Evaluator (Stage 9)…"
-            rows={4}
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-white placeholder-slate-600 resize-none focus:outline-none focus:border-indigo-500 font-mono"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!answer.trim()}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-all"
-          >
-            <Send size={12} /> Send to Semantic Evaluator (Stage 9)
-          </button>
-        </div>
-      ) : (
-        <div className="bg-emerald-900/20 border border-emerald-800/40 rounded-lg p-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={14} className="text-emerald-400" />
-            <span className="text-xs text-emerald-300">Answer submitted to Stage 9 — Semantic Evaluator</span>
-          </div>
-          {selectedQ < (questions?.length ?? 1) - 1 && (
-            <button onClick={handleNext} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
-              Next <ArrowRight size={11} />
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── INSPECTOR PANEL ──────────────────────────────────────────────────────────
 
-function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, onFilesReady, kbChecklist, onKBToggle, onSendToEval }) {
+function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, onFilesReady }) {
   const col = COLOR_MAP[stage.color];
   const StageIcon = stage.icon;
   const data = stageData;
 
   return (
     <div className="h-full overflow-y-auto pr-1" style={{ scrollbarWidth: "thin", scrollbarColor: "#334155 transparent" }}>
-      {/* Stage header */}
+      {/* Header */}
       <div className="flex items-center gap-3 mb-4">
-        <div className="w-9 h-9 rounded-lg flex items-center justify-center border" style={{ background: col.bg, borderColor: col.dot + "40" }}>
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center border"
+          style={{ background: col.bg, borderColor: col.dot + "40" }}>
           <StageIcon size={18} style={{ color: col.dot }} />
         </div>
         <div>
@@ -915,17 +725,23 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
         </div>
       </div>
 
-      {/* Stage 1: Upload */}
+      {/* Upload stage is shown even before stage data exists */}
       {stage.key === "upload" && (
         <>
-          <UploadStagePanel uploadedFiles={uploadedFiles} onFilesReady={onFilesReady} status={status} />
+          <UploadStagePanel
+            uploadedFiles={uploadedFiles}
+            onFilesReady={onFilesReady}
+            status={status}
+          />
           {data && (
             <>
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {(data.metrics || []).map((m, i) => <MetricCard key={i} {...m} />)}
               </div>
               <div>
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Terminal size={11} /> Upload Logs</p>
+                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Terminal size={11} /> Upload Logs
+                </p>
                 <LogConsole logs={data.logs || []} />
               </div>
             </>
@@ -933,16 +749,16 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
         </>
       )}
 
-      {/* Loading */}
+      {/* Loading state — not shown for upload (UI-driven) */}
       {isLoading && stage.key !== "upload" && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <Loader2 size={32} className="text-indigo-400 animate-spin" />
-          <p className="text-sm text-slate-400">Processing stage…</p>
+          <p className="text-sm text-slate-400">Claude is processing this stage…</p>
           <p className="text-xs text-slate-600 font-mono">stage: {stage.key}</p>
         </div>
       )}
 
-      {/* Pending */}
+      {/* Pending state — not shown for upload */}
       {!isLoading && !data && status === "pending" && stage.key !== "upload" && (
         <div className="flex flex-col items-center justify-center py-16 gap-3">
           <Clock size={28} className="text-slate-600" />
@@ -951,14 +767,22 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
         </div>
       )}
 
-      {/* Data view */}
+      {/* Data available — skip for upload which has its own UI */}
       {!isLoading && data && stage.key !== "upload" && (
         <>
+          {/* Metrics */}
           <div className="grid grid-cols-2 gap-2 mb-4">
             {(data.metrics || []).map((m, i) => <MetricCard key={i} {...m} />)}
           </div>
 
-          {/* Stage-specific panels */}
+          {/* Stage-specific content */}
+          {stage.key === "upload" && (
+            <UploadStagePanel
+              uploadedFiles={uploadedFiles}
+              onFilesReady={onFilesReady}
+              status={status}
+            />
+          )}
 
           {stage.key === "parsing" && data.structure && (
             <div className="mb-4">
@@ -975,26 +799,21 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
             </div>
           )}
 
-          {stage.key === "kb" && (
-            <>
-              {data.hierarchy && (
-                <div className="mb-4">
-                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Hierarchy Structure</p>
-                  <div className="space-y-1.5">
-                    {data.hierarchy.map((h, i) => (
-                      <div key={i} className="flex items-start gap-2 px-3 py-2 bg-slate-800/40 rounded">
-                        <div className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ marginLeft: i * 8, background: col.dot }} />
-                        <div>
-                          <p className="text-xs font-medium text-white">{h.level} <span className="text-slate-400">({h.entries})</span></p>
-                          <p className="text-xs text-slate-500">{h.example}</p>
-                        </div>
-                      </div>
-                    ))}
+          {stage.key === "kb" && data.hierarchy && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Hierarchy Structure</p>
+              <div className="space-y-1.5">
+                {data.hierarchy.map((h, i) => (
+                  <div key={i} className="flex items-start gap-2 px-3 py-2 bg-slate-800/40 rounded">
+                    <div className="w-2 h-2 rounded-full mt-1 shrink-0" style={{ marginLeft: i * 8, background: col.dot }} />
+                    <div>
+                      <p className="text-xs font-medium text-white">{h.level} <span className="text-slate-400">({h.entries})</span></p>
+                      <p className="text-xs text-slate-500">{h.example}</p>
+                    </div>
                   </div>
-                </div>
-              )}
-              <KBChecklist checklist={kbChecklist} onToggle={onKBToggle} />
-            </>
+                ))}
+              </div>
+            </div>
           )}
 
           {stage.key === "embedding" && data.chunks && (
@@ -1025,7 +844,8 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
                       <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${q.status === "pass" ? "bg-emerald-900/50 text-emerald-400" : "bg-amber-900/50 text-amber-400"}`}>{q.status}</span>
                     </div>
                     <div className="flex gap-3 text-xs text-slate-500">
-                      <span>Top-{q.topK}</span><span>{q.latency}</span>
+                      <span>Top-{q.topK}</span>
+                      <span>{q.latency}</span>
                       <span>Relevance: <span className="text-slate-300">{q.relevance}</span></span>
                     </div>
                   </div>
@@ -1034,29 +854,25 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
             </div>
           )}
 
-          {/* Stage 6: Q Gen — interactive Q&A */}
           {stage.key === "qgen" && data.questions && (
-            <>
-              <InteractiveQAPanel questions={data.questions} onSendToEval={onSendToEval} stageKey="qgen" />
-              <div className="mb-4">
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Full Question Bank</p>
-                <div className="space-y-1.5">
-                  {data.questions.map((q, i) => (
-                    <div key={i} className="bg-slate-800/40 border border-slate-700/30 rounded-lg p-2.5">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono text-slate-400">{q.id}</span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${q.diff === "easy" ? "bg-emerald-900/40 text-emerald-400" : q.diff === "medium" ? "bg-amber-900/40 text-amber-400" : "bg-red-900/40 text-red-400"}`}>{q.diff}</span>
-                      </div>
-                      <p className="text-xs text-white mb-1">{q.text}</p>
-                      <p className="text-xs text-slate-500">Intent: {q.intent}</p>
-                      <div className="flex gap-1 flex-wrap mt-1">
-                        {(q.mustInclude || []).map((kw, j) => <span key={j} className="text-xs bg-slate-700/50 text-slate-400 px-1.5 py-0.5 rounded">{kw}</span>)}
-                      </div>
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Generated Questions</p>
+              <div className="space-y-1.5">
+                {data.questions.map((q, i) => (
+                  <div key={i} className="bg-slate-800/40 border border-slate-700/30 rounded-lg p-2.5">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-mono text-slate-400">{q.id}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${q.diff === "easy" ? "bg-emerald-900/40 text-emerald-400" : q.diff === "medium" ? "bg-amber-900/40 text-amber-400" : "bg-red-900/40 text-red-400"}`}>{q.diff}</span>
                     </div>
-                  ))}
-                </div>
+                    <p className="text-xs text-white mb-1">{q.text}</p>
+                    <p className="text-xs text-slate-500">Intent: {q.intent}</p>
+                    <div className="flex gap-1 flex-wrap mt-1">
+                      {(q.mustInclude || []).map((kw, j) => <span key={j} className="text-xs bg-slate-700/50 text-slate-400 px-1.5 py-0.5 rounded">{kw}</span>)}
+                    </div>
+                  </div>
+                ))}
               </div>
-            </>
+            </div>
           )}
 
           {stage.key === "rubric" && data.channels && (
@@ -1077,33 +893,24 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
             </div>
           )}
 
-          {/* Stage 8: Adaptive Interview — interactive Q&A */}
           {stage.key === "interview" && data.transcript && (
-            <>
-              {/* Interactive Q&A from transcript agent turns */}
-              <InteractiveQAPanel
-                questions={data.transcript.filter(t => t.role === "agent").map((t, i) => ({ id: t.qid || `Q${i+1}`, text: t.text, role: t.role }))}
-                onSendToEval={onSendToEval}
-                stageKey="interview"
-              />
-              <div className="mb-4">
-                <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Reference Transcript</p>
-                <div className="space-y-2">
-                  {data.transcript.map((t, i) => (
-                    <div key={i} className={`rounded-lg p-2.5 ${t.role === "agent" ? "bg-blue-900/20 border border-blue-800/30" : "bg-slate-800/50 border border-slate-700/30"}`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-xs font-medium capitalize" style={{ color: t.role === "agent" ? "#60a5fa" : "#94a3b8" }}>
-                          {t.role === "agent" ? "🤖 AI Interviewer" : "👤 Candidate"}
-                        </span>
-                        {t.qid && <span className="text-xs font-mono text-slate-500">[{t.qid}]</span>}
-                        {t.score && <span className="text-xs text-emerald-400 ml-auto">score: {t.score}</span>}
-                      </div>
-                      <p className="text-xs text-slate-200">{t.text}</p>
+            <div className="mb-4">
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2">Interview Transcript</p>
+              <div className="space-y-2">
+                {data.transcript.map((t, i) => (
+                  <div key={i} className={`rounded-lg p-2.5 ${t.role === "agent" ? "bg-blue-900/20 border border-blue-800/30" : "bg-slate-800/50 border border-slate-700/30"}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="text-xs font-medium capitalize" style={{ color: t.role === "agent" ? "#60a5fa" : "#94a3b8" }}>
+                        {t.role === "agent" ? "🤖 AI Interviewer" : "👤 Candidate"}
+                      </span>
+                      {t.qid && <span className="text-xs font-mono text-slate-500">[{t.qid}]</span>}
+                      {t.score && <span className="text-xs text-emerald-400 ml-auto">score: {t.score}</span>}
                     </div>
-                  ))}
-                </div>
+                    <p className="text-xs text-slate-200">{t.text}</p>
+                  </div>
+                ))}
               </div>
-            </>
+            </div>
           )}
 
           {stage.key === "eval" && data.scores && (
@@ -1199,9 +1006,11 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
             </div>
           )}
 
-          {/* Logs always shown */}
+          {/* Logs */}
           <div>
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5"><Terminal size={11} /> Pipeline Logs</p>
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Terminal size={11} /> Pipeline Logs
+            </p>
             <LogConsole logs={data.logs || []} />
           </div>
         </>
@@ -1212,149 +1021,96 @@ function InspectorPanel({ stage, status, stageData, isLoading, uploadedFiles, on
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
-const INIT_CONFIG = (() => {
-  try {
-    const saved = localStorage.getItem("rageval_api_config");
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  return { baseUrl: "https://api.groq.com/v1", apiKey: "", model: "llama3-8b-8192" };
-})();
-
 export default function RAGEvalDashboard() {
-  const [statuses, setStatuses]           = useState(() => Object.fromEntries(PIPELINE_SEQUENCE.map(k => [k, "pending"])));
-  const [stageDataMap, setStageDataMap]   = useState({});
+  const [statuses, setStatuses]         = useState(() => Object.fromEntries(PIPELINE_SEQUENCE.map(k => [k, "pending"])));
+  const [stageDataMap, setStageDataMap] = useState({});
   const [loadingStages, setLoadingStages] = useState({});
-  const [activeStage, setActiveStage]     = useState(STAGES[0]);
-  const [isRunning, setIsRunning]         = useState(false);
+  const [activeStage, setActiveStage]   = useState(STAGES[0]);
+  const [isRunning, setIsRunning]       = useState(false);
+  const [currentStep, setCurrentStep]   = useState(0);
   const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [apiConfig, setApiConfig]         = useState(INIT_CONFIG);
-  const [simMode, setSimMode]             = useState(!INIT_CONFIG.apiKey);
-  const [kbChecklist, setKbChecklist]     = useState(null);
-  const [evalSubmissions, setEvalSubmissions] = useState([]);
-
-  const abortRef        = useRef(false);
-  const uploadResolveRef = useRef(null);
-
-  // Persist config and detect sim mode
-  useEffect(() => {
-    try { localStorage.setItem("rageval_api_config", JSON.stringify(apiConfig)); } catch {}
-    setSimMode(!apiConfig.apiKey || !apiConfig.apiKey.trim());
-  }, [apiConfig]);
+  const abortRef    = useRef(false);
+  const uploadResolveRef = useRef(null); // resolves when upload is complete
 
   const setStatus = useCallback((key, val) => setStatuses(s => ({ ...s, [key]: val })), []);
 
+  // Called by UploadStagePanel when all files are verified
   const handleFilesReady = useCallback((files) => {
     setUploadedFiles(files);
+    // Build synthetic upload stage data from real files
     const now = new Date();
     const pad = n => String(n).padStart(2, "0");
-    const ts = (ms) => {
-      const d = new Date(now.getTime() + ms);
+    const ts = (offsetMs) => {
+      const d = new Date(now.getTime() + offsetMs);
       return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3,"0")}`;
     };
     const totalSize = (files.reduce((s, f) => s + (f.rawSize || 0), 0) / (1024*1024)).toFixed(2);
     const uploadData = {
       metrics: [
         { label: "Files Uploaded", value: String(files.length), unit: "docs" },
-        { label: "Total Size",     value: totalSize,            unit: "MB"   },
-        { label: "Integrity",      value: "100%",               unit: ""     },
-        { label: "Upload Time",    value: (files.length * 0.4 + 0.5).toFixed(1), unit: "s" },
+        { label: "Total Size",     value: totalSize,             unit: "MB"   },
+        { label: "Integrity",      value: "100%",                unit: ""     },
+        { label: "Upload Time",    value: (files.length * 0.4 + 0.5).toFixed(1), unit: "s" }
       ],
-      files: files.map(f => ({ name: f.name, size: f.size, status: f.status, hash: f.hash })),
+      files: files.map(f => ({ name: f.name, size: f.size, pages: "—", status: f.status, hash: f.hash })),
       logs: [
         { time: ts(0),   level: "INFO",    msg: `Upload session initiated — session_id: eval_${Date.now()}` },
-        ...files.map((f, i) => ({ time: ts((i+1)*200), level: "INFO", msg: `${f.name} — SHA-256 verified — ${f.size}` })),
-        { time: ts(files.length*200 + 300), level: "SUCCESS", msg: `All ${files.length} files queued for parsing pipeline` },
-      ],
+        ...files.map((f, i) => ({ time: ts((i+1)*200), level: "INFO", msg: `${f.name} — SHA-256 hash verified — ${f.size}` })),
+        { time: ts(files.length*200 + 300), level: "SUCCESS", msg: `All ${files.length} files queued for parsing pipeline` }
+      ]
     };
     setStageDataMap(m => ({ ...m, upload: uploadData }));
     setStatus("upload", "success");
-    if (uploadResolveRef.current) { uploadResolveRef.current(); uploadResolveRef.current = null; }
+    // Unblock the pipeline if it's waiting
+    if (uploadResolveRef.current) {
+      uploadResolveRef.current();
+      uploadResolveRef.current = null;
+    }
   }, [setStatus]);
 
-  // When KB stage data arrives, initialise checklist from payload or defaults
-  useEffect(() => {
-    const kbData = stageDataMap["kb"];
-    if (kbData && !kbChecklist) {
-      if (kbData.checklist) {
-        setKbChecklist(kbData.checklist);
-      } else {
-        setKbChecklist([
-          { id: "c1", label: "Answer key format matches schema v3.0",              checked: true  },
-          { id: "c2", label: "All question IDs are globally unique",               checked: true  },
-          { id: "c3", label: "Rubric weight sums == 1.0 per question",             checked: true  },
-          { id: "c4", label: "Golden answers present for all questions",            checked: true  },
-          { id: "c5", label: "Difficulty distribution within bounds (10-40% hard)",checked: false },
-          { id: "c6", label: "No duplicate or near-duplicate questions detected",   checked: true  },
-          { id: "c7", label: "Intent tags mapped to rubric channels",              checked: true  },
-        ]);
-      }
-    }
-  }, [stageDataMap, kbChecklist]);
-
-  const handleKBToggle = useCallback((id) => {
-    setKbChecklist(list => list?.map(item => item.id === id ? { ...item, checked: !item.checked } : item));
-  }, []);
-
-  const handleSendToEval = useCallback((submission) => {
-    setEvalSubmissions(s => [...s, { ...submission, timestamp: new Date().toISOString() }]);
-  }, []);
-
-  // Run a single stage — tries live API first, falls back to simulation
+  // Run a single stage: upload is UI-driven; all others call Claude API
   const runStage = useCallback(async (key) => {
     setStatus(key, "processing");
 
     if (key === "upload") {
-      if (uploadedFiles.length > 0) { setStatus(key, "success"); return; }
+      // If files already uploaded, resolve immediately
+      if (uploadedFiles.length > 0) {
+        setStatus(key, "success");
+        return;
+      }
+      // Otherwise wait for the user to drop files — resolved by handleFilesReady
       setActiveStage(STAGES[0]);
       await new Promise(resolve => { uploadResolveRef.current = resolve; });
       return;
     }
 
     setLoadingStages(l => ({ ...l, [key]: true }));
-    let data = null;
-    let usedSim = false;
-
-    // If no API key configured, go straight to simulation
-    if (!apiConfig.apiKey || !apiConfig.apiKey.trim()) {
-      usedSim = true;
-    } else {
-      try {
-        data = await callLocalOrGroqAPI(key, apiConfig);
-      } catch (err) {
-        console.warn(`[RAGEval] Stage "${key}" API call failed, falling back to simulation:`, err.message);
-        usedSim = true;
-      }
-    }
-
-    if (usedSim) {
-      // Simulate a short delay for realism
-      await new Promise(r => setTimeout(r, 600 + Math.random() * 800));
-      data = buildSimulationPayload(key);
-    }
-
-    if (data) {
+    try {
+      const data = await callClaudeStage(key);
       setStageDataMap(m => ({ ...m, [key]: data }));
       setStatus(key, "success");
-    } else {
+    } catch (err) {
+      console.error(`Stage ${key} failed:`, err);
       setStatus(key, "failed");
+    } finally {
+      setLoadingStages(l => ({ ...l, [key]: false }));
     }
+  }, [setStatus, uploadedFiles]);
 
-    setLoadingStages(l => ({ ...l, [key]: false }));
-  }, [setStatus, uploadedFiles, apiConfig]);
-
+  // Run the full pipeline sequentially
   const runPipeline = useCallback(async () => {
     if (isRunning) return;
     abortRef.current = false;
     setIsRunning(true);
+    setCurrentStep(0);
     setStatuses(Object.fromEntries(PIPELINE_SEQUENCE.map(k => [k, "pending"])));
     setStageDataMap({});
     setUploadedFiles([]);
-    setKbChecklist(null);
-    setEvalSubmissions([]);
 
     for (let i = 0; i < PIPELINE_SEQUENCE.length; i++) {
       if (abortRef.current) break;
       const key = PIPELINE_SEQUENCE[i];
+      setCurrentStep(i + 1);
       setActiveStage(STAGES[i]);
       await runStage(key);
       if (abortRef.current) break;
@@ -1362,26 +1118,28 @@ export default function RAGEvalDashboard() {
     setIsRunning(false);
   }, [isRunning, runStage]);
 
+  // Step: run the next pending stage
   const stepPipeline = useCallback(async () => {
     if (isRunning) return;
     const nextIdx = PIPELINE_SEQUENCE.findIndex(k => statuses[k] === "pending");
     if (nextIdx === -1) return;
     const key = PIPELINE_SEQUENCE[nextIdx];
+    setCurrentStep(nextIdx + 1);
     setActiveStage(STAGES[nextIdx]);
     await runStage(key);
   }, [isRunning, statuses, runStage]);
 
   const resetPipeline = useCallback(() => {
     abortRef.current = true;
+    // Cancel any waiting upload promise
     if (uploadResolveRef.current) { uploadResolveRef.current(); uploadResolveRef.current = null; }
     setIsRunning(false);
+    setCurrentStep(0);
     setStatuses(Object.fromEntries(PIPELINE_SEQUENCE.map(k => [k, "pending"])));
     setStageDataMap({});
     setLoadingStages({});
     setUploadedFiles([]);
     setActiveStage(STAGES[0]);
-    setKbChecklist(null);
-    setEvalSubmissions([]);
   }, []);
 
   useEffect(() => () => { abortRef.current = true; }, []);
@@ -1391,7 +1149,7 @@ export default function RAGEvalDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col"
-      style={{ fontFamily: "'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace" }}>
+      style={{ fontFamily: "'IBM Plex Mono', 'JetBrains Mono', monospace" }}>
 
       {/* ── Header ── */}
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm px-4 py-2.5 flex items-center gap-3 sticky top-0 z-20">
@@ -1402,10 +1160,8 @@ export default function RAGEvalDashboard() {
           <span className="text-sm font-semibold text-white tracking-tight">RAG Eval · Assessment Lifecycle</span>
         </div>
         <div className="flex items-center gap-1 ml-2">
-          {simMode
-            ? <><WifiOff size={10} className="text-amber-400" /><span className="text-xs text-amber-400">Simulation Mode</span></>
-            : <><span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /><span className="text-xs text-slate-400">Live API</span></>
-          }
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs text-slate-400">Enterprise LLMOps v3.0 · Live Claude API</span>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -1418,7 +1174,7 @@ export default function RAGEvalDashboard() {
           </div>
           <button onClick={runPipeline} disabled={isRunning}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium transition-all">
-            <Play size={12} /> Run
+            <Play size={12} /> Run Pipeline
           </button>
           <button onClick={stepPipeline} disabled={isRunning || completedCount === 11}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium transition-all">
@@ -1431,25 +1187,21 @@ export default function RAGEvalDashboard() {
         </div>
       </header>
 
-      {/* ── API Config Panel ── */}
-      <APIConfigPanel config={apiConfig} setConfig={setApiConfig} simMode={simMode} />
-
       {/* ── Summary Bar ── */}
       <div className="border-b border-slate-800 bg-slate-900/50 px-4 py-2 flex gap-4 overflow-x-auto">
         {[
-          { icon: FileText,   label: "Documents",       value: uploadedFiles.length || 0,            color: "text-teal-400"    },
-          { icon: Activity,   label: "Avg Latency",     value: "42ms",                               color: "text-blue-400"   },
-          { icon: TrendingUp, label: "Progress",        value: `${Math.round((completedCount / 11) * 100)}%`, color: "text-emerald-400" },
-          { icon: Loader2,    label: "Running",         value: isRunning ? 1 : 0,                    color: "text-amber-400"  },
-          { icon: Hash,       label: "Stage",           value: processingKey ? `${PIPELINE_SEQUENCE.indexOf(processingKey) + 1}/11` : completedCount === 11 ? "Done" : "—", color: "text-purple-400" },
-          { icon: Award,      label: "Candidate",       value: "CAND_001",                           color: "text-rose-400"   },
-          { icon: FlaskConical, label: "Mode",          value: simMode ? "Simulation" : "Live",      color: simMode ? "text-amber-400" : "text-emerald-400" },
-        ].map((m, i, arr) => (
+          { icon: FileText,   label: "Documents",       value: "3",             color: "text-teal-400" },
+          { icon: Activity,   label: "Avg Latency",     value: "42ms",          color: "text-blue-400" },
+          { icon: TrendingUp, label: "Success Rate",    value: completedCount === 0 ? "0%" : `${Math.round((completedCount / 11) * 100)}%`, color: "text-emerald-400" },
+          { icon: Loader2,    label: "Active Pipelines",value: isRunning ? 1 : 0, color: "text-amber-400" },
+          { icon: Hash,       label: "Stage",           value: processingKey ? `${PIPELINE_SEQUENCE.indexOf(processingKey) + 1}/11` : completedCount === 11 ? "Complete" : "—", color: "text-purple-400" },
+          { icon: Award,      label: "Candidate",       value: "CAND_001",      color: "text-rose-400" },
+        ].map((m, i) => (
           <div key={i} className="flex items-center gap-2 shrink-0">
-            <m.icon size={13} className={m.color + (m.label === "Running" && isRunning ? " animate-spin" : "")} />
+            <m.icon size={13} className={m.color + (m.label === "Active Pipelines" && isRunning ? " animate-spin" : "")} />
             <span className="text-xs text-slate-500">{m.label}</span>
             <span className={`text-xs font-semibold ${m.color}`}>{m.value}</span>
-            {i < arr.length - 1 && <div className="w-px h-3 bg-slate-700 ml-2" />}
+            {i < 5 && <div className="w-px h-3 bg-slate-700 ml-2" />}
           </div>
         ))}
       </div>
@@ -1465,8 +1217,8 @@ export default function RAGEvalDashboard() {
             <div className="relative">
               <div className="absolute left-4 top-5 bottom-5 w-px bg-slate-800" />
               {STAGES.map((stage, i) => {
-                const status   = statuses[stage.key];
-                const col      = COLOR_MAP[stage.color];
+                const status  = statuses[stage.key];
+                const col     = COLOR_MAP[stage.color];
                 const isActive = activeStage.key === stage.key;
                 const StageIcon = stage.icon;
                 return (
@@ -1507,30 +1259,37 @@ export default function RAGEvalDashboard() {
             isLoading={!!loadingStages[activeStage.key]}
             uploadedFiles={uploadedFiles}
             onFilesReady={handleFilesReady}
-            kbChecklist={activeStage.key === "kb" ? kbChecklist : null}
-            onKBToggle={handleKBToggle}
-            onSendToEval={handleSendToEval}
           />
         </main>
       </div>
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-800 bg-slate-900/50 px-4 py-1.5 flex items-center gap-3 text-xs text-slate-500">
-        <span className="font-mono">session: eval_{new Date().toISOString().slice(0,10).replace(/-/g,"")}</span>
+        <span className="font-mono">session: eval_20240118_1432</span>
         <span>·</span>
         <span>schema: v3.0</span>
         <span>·</span>
-        <span>{simMode ? <span className="text-amber-400">⬡ Simulation</span> : <span className="text-emerald-400">● Live: {apiConfig.baseUrl}</span>}</span>
-        {evalSubmissions.length > 0 && <><span>·</span><span className="text-indigo-400">{evalSubmissions.length} answer{evalSubmissions.length > 1 ? "s" : ""} queued for eval</span></>}
+        <span>model: claude-sonnet-4-20250514</span>
+        <span>·</span>
+        <span className="text-indigo-400 font-medium">● Live API</span>
         <div className="ml-auto flex items-center gap-3">
           {isRunning && statuses["upload"] === "processing" && (
-            <span className="flex items-center gap-1.5 text-teal-400"><Upload size={11} className="animate-bounce" />Waiting for file upload…</span>
+            <span className="flex items-center gap-1.5 text-teal-400">
+              <Upload size={11} className="animate-bounce" />
+              Waiting for file upload…
+            </span>
           )}
           {isRunning && statuses["upload"] !== "processing" && (
-            <span className="flex items-center gap-1.5 text-blue-400"><Loader2 size={11} className="animate-spin" />Pipeline running…</span>
+            <span className="flex items-center gap-1.5 text-blue-400">
+              <Loader2 size={11} className="animate-spin" />
+              Pipeline running…
+            </span>
           )}
           {completedCount === 11 && (
-            <span className="flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={11} />All 11 stages complete</span>
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 size={11} />
+              All 11 stages complete
+            </span>
           )}
           <span className="font-mono">{new Date().toISOString().slice(0, 19).replace("T", " ")} UTC</span>
         </div>
